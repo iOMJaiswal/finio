@@ -1,0 +1,22 @@
+{
+  "name": "finio",
+  "version": "1.0.0",
+  "description": "Personal Finance Dashboard — Your money, finally clear.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "node server/index.js",
+    "dev:client": "cd client && npx vite",
+    "seed": "node server/seed.js",
+    "build": "cd client && npx vite build",
+    "start": "NODE_ENV=production node server/index.js"
+  },
+  "dependencies": {
+    "postgres": "^3.4.5",
+    "dotenv": "^16.4.5",
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "concurrently": "^9.1.0"
+  }
+}
