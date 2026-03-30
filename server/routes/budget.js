@@ -8,29 +8,63 @@ router.get('/', async (req, res) => {
   try {
     const month = req.query.month || new Date().toISOString().slice(0, 7);
 
-    const budgets = await sql`SELECT * FROM budgets`;
+    const budgets = await sql`
+      SELECT
+        b.id,
+        b.category,
+        b.monthly_limit,
+        b.color,
+        b.icon,
+        COALESCE(sp.total, 0) AS spent
+      FROM budgets b
+      LEFT JOIN (
+        SELECT category, SUM(amount) AS total
+        FROM transactions
+        WHERE type = 'expense' AND SUBSTRING(date, 1, 7) = ${month}
+        GROUP BY category
+      ) sp ON sp.category = b.category
+      ORDER BY b.id
+    `;
 
-    const result = await Promise.all(budgets.map(async (b) => {
-      const [spentRow] = await sql`
-        SELECT COALESCE(SUM(amount), 0) as total FROM transactions
-        WHERE type = 'expense' AND category = ${b.category} AND SUBSTRING(date, 1, 7) = ${month}
-      `;
-      const spent = Number(spentRow.total);
+    const recentRows = await sql`
+      SELECT category, id, date, merchant, amount
+      FROM (
+        SELECT
+          t.category,
+          t.id,
+          t.date,
+          t.merchant,
+          t.amount,
+          ROW_NUMBER() OVER (PARTITION BY t.category ORDER BY t.date DESC, t.id DESC) AS rn
+        FROM transactions t
+        WHERE t.type = 'expense' AND SUBSTRING(t.date, 1, 7) = ${month}
+      ) ranked
+      WHERE rn <= 3
+      ORDER BY category, date DESC, id DESC
+    `;
 
-      const recentTxns = await sql`
-        SELECT id, date, merchant, amount FROM transactions
-        WHERE type = 'expense' AND category = ${b.category} AND SUBSTRING(date, 1, 7) = ${month}
-        ORDER BY date DESC LIMIT 3
-      `;
+    const recentByCategory = {};
+    for (const row of recentRows) {
+      if (!recentByCategory[row.category]) recentByCategory[row.category] = [];
+      recentByCategory[row.category].push({
+        id: row.id,
+        date: row.date,
+        merchant: row.merchant,
+        amount: Number(row.amount),
+      });
+    }
 
+    const result = budgets.map((b) => {
+      const spent = Number(b.spent) || 0;
+      const monthlyLimit = Number(b.monthly_limit) || 0;
       return {
         ...b,
         spent,
-        remaining: b.monthly_limit - spent,
-        percentage: b.monthly_limit > 0 ? (spent / b.monthly_limit) * 100 : 0,
-        recentTransactions: recentTxns,
+        remaining: monthlyLimit - spent,
+        percentage: monthlyLimit > 0 ? (spent / monthlyLimit) * 100 : 0,
+        recentTransactions: recentByCategory[b.category] || [],
       };
-    }));
+    });
 
     res.json(result);
   } catch (err) {

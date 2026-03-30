@@ -16,9 +16,11 @@ const Reports = lazy(() => import('./pages/Reports'));
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 60 * 1000,
+      staleTime: 5 * 60 * 1000,
       gcTime: 5 * 60 * 1000,
       retry: 1,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
     },
   },
 });

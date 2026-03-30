@@ -176,16 +176,28 @@ router.get('/net-worth-history', async (req, res) => {
       monthStrs.push(`${yy}-${String(mm).padStart(2, '0')}`);
     }
 
-    const results = await Promise.all(
-      monthStrs.map(async (monthStr) => {
-        const rows = await sql`
-          SELECT balance_after FROM transactions
-          WHERE SUBSTRING(date, 1, 7) <= ${monthStr}
-          ORDER BY date DESC, id DESC LIMIT 1
-        `;
-        return { month: monthStr, netWorth: rows[0] ? Number(rows[0].balance_after) : 0 };
-      })
+    const placeholders = monthStrs.map((_, i) => `$${i + 1}`).join(', ');
+    const rows = await sql.unsafe(
+      `WITH months AS (
+         SELECT UNNEST(ARRAY[${placeholders}]::text[]) AS month
+       )
+       SELECT m.month, COALESCE(last_balance.balance_after, 0) AS net_worth
+       FROM months m
+       LEFT JOIN LATERAL (
+         SELECT t.balance_after
+         FROM transactions t
+         WHERE SUBSTRING(t.date, 1, 7) <= m.month
+         ORDER BY t.date DESC, t.id DESC
+         LIMIT 1
+       ) last_balance ON true
+       ORDER BY m.month`,
+      monthStrs
     );
+
+    const results = rows.map((r) => ({
+      month: r.month,
+      netWorth: Number(r.net_worth) || 0,
+    }));
 
     res.json(results);
   } catch (err) {
