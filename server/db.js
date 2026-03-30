@@ -13,8 +13,9 @@ try {
   const parsed = new URL(rawDatabaseUrl);
   const isSupabasePooler = parsed.hostname.endsWith('.pooler.supabase.com');
 
-  // In this workspace, 6543 repeatedly times out while 5432 responds reliably.
-  if (isSupabasePooler && parsed.port === '6543') {
+  // Keep transaction mode (6543) on Vercel to avoid Session mode client limits.
+  // For local development only, allow a fallback to 5432 if 6543 is unreachable.
+  if (isSupabasePooler && parsed.port === '6543' && !process.env.VERCEL) {
     parsed.port = '5432';
     databaseUrl = parsed.toString();
   }
