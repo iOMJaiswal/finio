@@ -94,14 +94,16 @@ router.get('/monthly-totals', async (req, res) => {
       monthStrs.push(`${yy}-${String(mm).padStart(2, '0')}`);
     }
 
-    const rows = await sql`
-      SELECT SUBSTRING(date, 1, 7) as month,
+    const mPlaceholders = monthStrs.map((_, i) => `$${i + 1}`).join(', ');
+    const rows = await sql.unsafe(
+      `SELECT SUBSTRING(date, 1, 7) as month,
         SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END) as income,
         SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END) as expenses
-      FROM transactions
-      WHERE SUBSTRING(date, 1, 7) = ANY(${monthStrs})
-      GROUP BY SUBSTRING(date, 1, 7)
-    `;
+       FROM transactions
+       WHERE SUBSTRING(date, 1, 7) = ANY(ARRAY[${mPlaceholders}]::text[])
+       GROUP BY SUBSTRING(date, 1, 7)`,
+      monthStrs
+    );
 
     const rowMap = {};
     for (const r of rows) rowMap[r.month] = r;
@@ -209,14 +211,17 @@ router.get('/spending-trends', async (req, res) => {
       monthStrs.push(`${yy}-${String(mm).padStart(2, '0')}`);
     }
 
-    const rows = await sql`
-      SELECT SUBSTRING(date, 1, 7) as month, category, SUM(amount) as total
-      FROM transactions
-      WHERE type = 'expense'
-        AND category = ANY(${categories})
-        AND SUBSTRING(date, 1, 7) = ANY(${monthStrs})
-      GROUP BY SUBSTRING(date, 1, 7), category
-    `;
+    const catPh = categories.map((_, i) => `$${i + 1}`).join(', ');
+    const mPh = monthStrs.map((_, i) => `$${categories.length + i + 1}`).join(', ');
+    const rows = await sql.unsafe(
+      `SELECT SUBSTRING(date, 1, 7) as month, category, SUM(amount) as total
+       FROM transactions
+       WHERE type = 'expense'
+         AND category = ANY(ARRAY[${catPh}]::text[])
+         AND SUBSTRING(date, 1, 7) = ANY(ARRAY[${mPh}]::text[])
+       GROUP BY SUBSTRING(date, 1, 7), category`,
+      [...categories, ...monthStrs]
+    );
 
     const dataMap = {};
     for (const r of rows) {
@@ -252,13 +257,15 @@ router.get('/income-breakdown', async (req, res) => {
       monthStrs.push(`${yy}-${String(mm).padStart(2, '0')}`);
     }
 
-    const rows = await sql`
-      SELECT merchant, SUM(amount) as total
-      FROM transactions
-      WHERE type = 'income' AND SUBSTRING(date, 1, 7) = ANY(${monthStrs})
-      GROUP BY merchant
-      ORDER BY total DESC
-    `;
+    const mPh = monthStrs.map((_, i) => `$${i + 1}`).join(', ');
+    const rows = await sql.unsafe(
+      `SELECT merchant, SUM(amount) as total
+       FROM transactions
+       WHERE type = 'income' AND SUBSTRING(date, 1, 7) = ANY(ARRAY[${mPh}]::text[])
+       GROUP BY merchant
+       ORDER BY total DESC`,
+      monthStrs
+    );
 
     const grandTotal = rows.reduce((s, r) => s + Number(r.total), 0);
     const result = rows.map(r => ({
@@ -294,36 +301,40 @@ router.get('/category-deep-dive', async (req, res) => {
       monthStrs.push(`${yy}-${String(mm).padStart(2, '0')}`);
     }
 
-    const monthlyRows = await sql`
-      SELECT SUBSTRING(date, 1, 7) as month, COALESCE(SUM(amount), 0) as total
-      FROM transactions
-      WHERE type = 'expense' AND category = ${category}
-        AND SUBSTRING(date, 1, 7) = ANY(${monthStrs})
-      GROUP BY SUBSTRING(date, 1, 7)
-    `;
+    const mPh = monthStrs.map((_, i) => `$${i + 2}`).join(', ');
+    const monthlyRows = await sql.unsafe(
+      `SELECT SUBSTRING(date, 1, 7) as month, COALESCE(SUM(amount), 0) as total
+       FROM transactions
+       WHERE type = 'expense' AND category = $1
+         AND SUBSTRING(date, 1, 7) = ANY(ARRAY[${mPh}]::text[])
+       GROUP BY SUBSTRING(date, 1, 7)`,
+      [category, ...monthStrs]
+    );
 
     const monthMap = {};
     for (const r of monthlyRows) monthMap[r.month] = Number(r.total);
     const monthlySpending = monthStrs.map(m => ({ month: m, total: monthMap[m] || 0 }));
     const avgMonthly = monthlySpending.reduce((s, r) => s + r.total, 0) / monthlySpending.length;
 
-    const topMerchants = await sql`
-      SELECT merchant, SUM(amount) as total, COUNT(*) as count
-      FROM transactions
-      WHERE type = 'expense' AND category = ${category}
-        AND SUBSTRING(date, 1, 7) = ANY(${monthStrs})
-      GROUP BY merchant
-      ORDER BY total DESC
-      LIMIT 5
-    `;
+    const topMerchants = await sql.unsafe(
+      `SELECT merchant, SUM(amount) as total, COUNT(*) as count
+       FROM transactions
+       WHERE type = 'expense' AND category = $1
+         AND SUBSTRING(date, 1, 7) = ANY(ARRAY[${mPh}]::text[])
+       GROUP BY merchant
+       ORDER BY total DESC
+       LIMIT 5`,
+      [category, ...monthStrs]
+    );
 
-    const biggestRows = await sql`
-      SELECT * FROM transactions
-      WHERE type = 'expense' AND category = ${category}
-        AND SUBSTRING(date, 1, 7) = ANY(${monthStrs})
-      ORDER BY amount DESC
-      LIMIT 1
-    `;
+    const biggestRows = await sql.unsafe(
+      `SELECT * FROM transactions
+       WHERE type = 'expense' AND category = $1
+         AND SUBSTRING(date, 1, 7) = ANY(ARRAY[${mPh}]::text[])
+       ORDER BY amount DESC
+       LIMIT 1`,
+      [category, ...monthStrs]
+    );
 
     res.json({
       monthlySpending,
@@ -352,14 +363,16 @@ router.get('/monthly-savings', async (req, res) => {
       monthStrs.push(`${yy}-${String(mm).padStart(2, '0')}`);
     }
 
-    const rows = await sql`
-      SELECT SUBSTRING(date, 1, 7) as month,
+    const mPlaceholders = monthStrs.map((_, i) => `$${i + 1}`).join(', ');
+    const rows = await sql.unsafe(
+      `SELECT SUBSTRING(date, 1, 7) as month,
         SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END) as income,
         SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END) as expenses
-      FROM transactions
-      WHERE SUBSTRING(date, 1, 7) = ANY(${monthStrs})
-      GROUP BY SUBSTRING(date, 1, 7)
-    `;
+       FROM transactions
+       WHERE SUBSTRING(date, 1, 7) = ANY(ARRAY[${mPlaceholders}]::text[])
+       GROUP BY SUBSTRING(date, 1, 7)`,
+      monthStrs
+    );
 
     const rowMap = {};
     for (const r of rows) rowMap[r.month] = r;
@@ -381,3 +394,4 @@ router.get('/monthly-savings', async (req, res) => {
 });
 
 export default router;
+
